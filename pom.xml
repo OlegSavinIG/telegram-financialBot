@@ -25,6 +25,21 @@
         <artifactId>telegrambots-spring-boot-starter</artifactId>
         <version>6.5.0</version>
     </dependency>
+    <dependency>
+        <groupId>com.rabbitmq</groupId>
+        <artifactId>amqp-client</artifactId>
+        <version>5.14.2</version> <!-- Актуальная версия -->
+    </dependency>
+    <dependency>
+        <groupId>org.postgresql</groupId>
+        <artifactId>postgresql</artifactId>
+        <version>42.2.19</version> <!-- Актуальная версия драйвера PostgreSQL -->
+    </dependency>
+    <dependency>
+        <groupId>redis.clients</groupId>
+        <artifactId>jedis</artifactId>
+        <version>4.0.1</version> <!-- Актуальная версия Jedis для Redis -->
+    </dependency>
 </dependencies>
 
 </project>
