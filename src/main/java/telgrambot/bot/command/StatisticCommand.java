@@ -1,13 +1,13 @@
 package telgrambot.bot.command;
 
 import telgrambot.bot.MyTelegramBot;
-import telgrambot.bot.financeapi.StatisticService;
+import telgrambot.bot.financeapi.StatisticServiceApi;
 
 public class StatisticCommand implements Command {
-    private final StatisticService statisticService;
+    private final StatisticServiceApi statisticService;
 
     public StatisticCommand() {
-        this.statisticService = new StatisticService();
+        this.statisticService = new StatisticServiceApi();
     }
 
     @Override

@@ -7,7 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
-public class StatisticService {
+public class StatisticServiceApi {
 
     private static final String API_URL = "https://api.example.com/vacancies"; // URL внешнего API
     private static final HttpClient CLIENT = HttpClient.newBuilder()

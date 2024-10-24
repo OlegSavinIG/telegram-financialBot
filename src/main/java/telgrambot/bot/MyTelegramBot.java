@@ -13,7 +13,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     private static final String QUEUE_NAME = "telegram_messages";
     private final CommandHandler commandHandler = new CommandHandler();
     private final String BOT_TOKEN = System.getenv("BOT_TOKEN");
-    private final String BOT_USERNAME = "FINANCE_BOT";
+    private final String BOT_USERNAME = "FinanceAndInvestmentBot";
 
     @Override
     public void onUpdateReceived(Update update) {
@@ -26,23 +26,26 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     }
     // Метод для отправки сообщения в RabbitMQ
     public void sendMessageToQueue(Long chatId, String messageText) {
+        System.out.println("Попытка отправки сообщения в очередь: " + messageText);
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("localhost"); // Настройте хост RabbitMQ
+        factory.setHost("localhost");
+        factory.setUsername("guest");
+        factory.setPassword("guest");
 
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
 
             channel.queueDeclare(QUEUE_NAME, false, false, false, null);
-
-            // Создаем сообщение для очереди
             String message = chatId + ";" + messageText;
             channel.basicPublish("", QUEUE_NAME, null, message.getBytes());
             System.out.println(" [x] Sent '" + message + "'");
 
         } catch (Exception e) {
+            System.err.println("Ошибка при отправке сообщения в RabbitMQ: " + e.getMessage());
             e.printStackTrace();
         }
     }
+
     // Отправка сообщений
     public void sendMessage(Long chatId, String text) {
         SendMessage message = new SendMessage();

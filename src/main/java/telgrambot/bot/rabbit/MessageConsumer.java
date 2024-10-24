@@ -16,8 +16,13 @@ public class MessageConsumer {
 
     public static void main(String[] args) throws Exception {
         ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("localhost"); // Настройте хост RabbitMQ
+        factory.setHost("localhost");
+        factory.setUsername("guest");
+        factory.setPassword("guest");
+        System.out.println("Попытка подключения к RabbitMQ Consumer на localhost...");
         Connection connection = factory.newConnection();
+        System.out.println("Успешное подключение к RabbitMQ.");
+
         Channel channel = connection.createChannel();
 
         channel.queueDeclare(QUEUE_NAME, false, false, false, null);
