@@ -20,4 +20,7 @@ public class RedisService {
     public void clearUserState(Long chatId) {
         jedis.del(chatId.toString());
     }
+    public boolean existUser(Long chatId) {
+        return jedis.exists(chatId.toString());
+    }
 }
