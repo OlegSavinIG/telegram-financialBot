@@ -9,62 +9,111 @@ import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-public class MessageConsumer {
+import java.io.IOException;
+import java.util.concurrent.TimeoutException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+public class MessageConsumer {
     private static final String QUEUE_NAME = "telegram_messages";
     private static final String BOT_TOKEN = System.getenv("BOT_TOKEN");
+    private static final Logger logger = Logger.getLogger(MessageConsumer.class.getName());
 
-    public static void main(String[] args) throws Exception {
-        ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("localhost");
-        factory.setUsername("guest");
-        factory.setPassword("guest");
-        System.out.println("Попытка подключения к RabbitMQ Consumer на localhost...");
-        Connection connection = factory.newConnection();
-        System.out.println("Успешное подключение к RabbitMQ.");
+    private final DefaultAbsSender bot;
+    private Connection connection;
+    private Channel channel;
 
-        Channel channel = connection.createChannel();
-
-        channel.queueDeclare(QUEUE_NAME, false, false, false, null);
-        System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
-
-        DeliverCallback deliverCallback = (consumerTag, delivery) -> {
-            String message = new String(delivery.getBody(), "UTF-8");
-            System.out.println(" [x] Received '" + message + "'");
-
-            // Разделим сообщение на chatId и текст
-            String[] parts = message.split(";");
-            Long chatId = Long.parseLong(parts[0]);
-            String messageText = parts[1];
-
-            // Обрабатываем сообщение и отправляем ответ через Telegram API
-            processMessage(chatId, messageText);
-        };
-
-        channel.basicConsume(QUEUE_NAME, true, deliverCallback, consumerTag -> { });
+    public MessageConsumer() {
+        this.bot = createBot();
     }
 
-    // Обработка сообщения и отправка ответа пользователю
-    private static void processMessage(Long chatId, String messageText) {
-        // Создаем экземпляр бота для отправки сообщений
-        DefaultAbsSender bot = new DefaultAbsSender(new DefaultBotOptions()) {
+    public static void main(String[] args) {
+        MessageConsumer consumer = new MessageConsumer();
+        consumer.startListening();
+    }
+
+    private DefaultAbsSender createBot() {
+        return new DefaultAbsSender(new DefaultBotOptions()) {
             @Override
             public String getBotToken() {
                 return BOT_TOKEN;
             }
         };
+    }
 
-        // Логика обработки сообщения (например, отвечаем на команду)
+    private void startListening() {
+        try {
+            connectToRabbitMQ();
+            listenForMessages();
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Ошибка при подключении к RabbitMQ или Telegram: ", e);
+            closeResources();
+        }
+    }
+
+    private void connectToRabbitMQ() throws IOException, TimeoutException {
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("localhost");
+        factory.setUsername("guest");
+        factory.setPassword("guest");
+        logger.info("Попытка подключения к RabbitMQ Consumer на localhost...");
+
+        this.connection = factory.newConnection();
+        this.channel = connection.createChannel();
+        channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+
+        logger.info("Успешное подключение к RabbitMQ.");
+        logger.info(" [*] Ожидание сообщений. Нажмите CTRL+C для выхода.");
+    }
+
+    private void listenForMessages() throws IOException {
+        DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+            String message = new String(delivery.getBody(), "UTF-8");
+            logger.info(" [x] Получено сообщение: '" + message + "'");
+
+            String[] parts = message.split(";");
+            if (parts.length == 2) {
+                try {
+                    Long chatId = Long.parseLong(parts[0]);
+                    String messageText = parts[1];
+                    processMessage(chatId, messageText);
+                } catch (NumberFormatException e) {
+                    logger.warning("Ошибка разбора chatId: " + parts[0]);
+                }
+            } else {
+                logger.warning("Сообщение не соответствует ожидаемому формату: " + message);
+            }
+        };
+
+        channel.basicConsume(QUEUE_NAME, true, deliverCallback, consumerTag -> {});
+    }
+
+    private void processMessage(Long chatId, String messageText) {
         String response = "Вы отправили: " + messageText;
-
-        SendMessage sendMessage = new SendMessage();
-        sendMessage.setChatId(chatId.toString());
-        sendMessage.setText(response);
+        SendMessage sendMessage = SendMessage.builder()
+                .chatId(chatId.toString())
+                .text(response)
+                .build();
 
         try {
-            bot.execute(sendMessage); // Отправляем сообщение пользователю
+            bot.execute(sendMessage);
+            logger.info("Сообщение отправлено в Telegram: " + response);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            logger.log(Level.SEVERE, "Ошибка при отправке сообщения в Telegram: ", e);
+        }
+    }
+
+    private void closeResources() {
+        try {
+            if (channel != null && channel.isOpen()) {
+                channel.close();
+            }
+            if (connection != null && connection.isOpen()) {
+                connection.close();
+            }
+            logger.info("Соединение с RabbitMQ закрыто.");
+        } catch (IOException | TimeoutException e) {
+            logger.log(Level.SEVERE, "Ошибка при закрытии соединения с RabbitMQ: ", e);
         }
     }
 }

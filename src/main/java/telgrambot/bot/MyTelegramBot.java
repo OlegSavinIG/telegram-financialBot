@@ -9,60 +9,67 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import telgrambot.bot.command.Command;
 import telgrambot.bot.command.CommandHandler;
+import telgrambot.bot.command.*;
+import telgrambot.bot.command.StartCommand;
 import telgrambot.bot.keyboard.InlineKeyboard;
 import telgrambot.bot.keyboard.ReplyKeyboard;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.logging.Logger;
 
 public class MyTelegramBot extends TelegramLongPollingBot {
     private static final String QUEUE_NAME = "telegram_messages";
+    private static final Logger logger = Logger.getLogger(MyTelegramBot.class.getName());
     private final String BOT_TOKEN = System.getenv("BOT_TOKEN");
     private final String BOT_USERNAME = "FinanceAndInvestmentBot";
-    private final CommandHandler commandHandler = new CommandHandler();
-    private final ReplyKeyboard replyKeyboard = new ReplyKeyboard();
-    private final InlineKeyboard inlineKeyboard = new InlineKeyboard();
+    private final CommandHandler commandHandler;
+    private final ReplyKeyboard replyKeyboard;
+    private final InlineKeyboard inlineKeyboard;
+    private Connection connection;
+    private Channel channel;
+
+    public MyTelegramBot() {
+        Map<String, Command> commands = Map.of(
+                "/start", new StartCommand(),
+                "/help", new HelpCommand(),
+                "/statistic", new StatisticCommand(),
+                "/reply", new ReplyCommand(),
+                "/inline", new InlineCommand(),
+                "button1", new Button1Command(),
+                "button2", new Button2Command(),
+                "button3", new Button3Command()
+        );
+        this.commandHandler = new CommandHandler(commands);
+        this.replyKeyboard = new ReplyKeyboard();
+        this.inlineKeyboard = new InlineKeyboard();
+        setupRabbitMQ();
+        registerCommands();
+    }
 
     @Override
     public void onUpdateReceived(Update update) {
         if (update.hasMessage() && update.getMessage().hasText()) {
-            String messageText = update.getMessage().getText();
-            Long chatId = update.getMessage().getChatId();
-
-            commandHandler.handleCommand(chatId, messageText, this);
-        }
-
-        if (update.hasCallbackQuery()) {
-            String callbackData = update.getCallbackQuery().getData();
-            Long chatId = update.getCallbackQuery().getMessage().getChatId();
-
-            // Используем новый метод для обработки callback-команд
-            commandHandler.handleCallback(chatId, callbackData, this);
+            processTextMessage(update);
+        } else if (update.hasCallbackQuery()) {
+            processCallbackQuery(update);
         }
     }
 
-    // Метод для отправки сообщения в RabbitMQ
     public void sendMessageToQueue(Long chatId, String messageText) {
-        System.out.println("Попытка отправки сообщения в очередь: " + messageText);
-        ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("localhost");
-        factory.setUsername("guest");
-        factory.setPassword("guest");
-
-        try (Connection connection = factory.newConnection();
-             Channel channel = connection.createChannel()) {
-
-            channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+        logger.info("Отправка сообщения в очередь: " + messageText);
+        try {
             String message = chatId + ";" + messageText;
             channel.basicPublish("", QUEUE_NAME, null, message.getBytes());
-            System.out.println(" [x] Sent '" + message + "'");
-
+            logger.info("Сообщение отправлено: " + message);
         } catch (Exception e) {
-            System.err.println("Ошибка при отправке сообщения в RabbitMQ: " + e.getMessage());
-            e.printStackTrace();
+            logger.severe("Ошибка при отправке в RabbitMQ: " + e.getMessage());
         }
     }
+
     public void registerCommands() {
         List<BotCommand> commands = new ArrayList<>();
         commands.add(new BotCommand("/start", "Запустить бота"));
@@ -74,32 +81,65 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
         try {
             this.execute(setMyCommands);
-            System.out.println("Команды успешно зарегистрированы.");
+            logger.info("Команды успешно зарегистрированы.");
         } catch (TelegramApiException e) {
-            System.err.println("Ошибка при регистрации команд: " + e.getMessage());
-            e.printStackTrace();
+            logger.severe("Ошибка при регистрации команд: " + e.getMessage());
         }
     }
 
     public void sendInlineKeyboard(Long chatId) {
-        InlineKeyboard inlineKeyboard = new InlineKeyboard();
-        inlineKeyboard.sendInlineKeyboard(chatId, this); // Передаем chatId и экземпляр бота
+        inlineKeyboard.sendInlineKeyboard(chatId, this);
     }
 
     public void sendReplyKeyboard(Long chatId) {
-        ReplyKeyboard replyKeyboard = new ReplyKeyboard();
-        replyKeyboard.sendReplyKeyboard(chatId, this); // Передаем chatId и экземпляр бота
+        replyKeyboard.sendReplyKeyboard(chatId, this);
     }
 
-    // Отправка сообщений
     public void sendMessage(Long chatId, String text) {
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId.toString());
-        message.setText(text);
+        SendMessage message = SendMessage.builder()
+                .chatId(chatId.toString())
+                .text(text)
+                .build();
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            logger.severe("Ошибка при отправке сообщения: " + e.getMessage());
+        }
+    }
+
+    private void closeResources() {
+        try {
+            if (channel != null && channel.isOpen()) {
+                channel.close();
+            }
+            if (connection != null && connection.isOpen()) {
+                connection.close();
+            }
+        } catch (Exception e) {
+            logger.warning("Ошибка при закрытии ресурсов RabbitMQ: " + e.getMessage());
+        }
+    }
+    private void processTextMessage(Update update) {
+        String messageText = update.getMessage().getText();
+        Long chatId = update.getMessage().getChatId();
+        commandHandler.handleCommand(chatId, messageText, this);
+    }
+    private void processCallbackQuery(Update update) {
+        String callbackData = update.getCallbackQuery().getData();
+        Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        commandHandler.handleCallback(chatId, callbackData, this);
+    }
+    private void setupRabbitMQ() {
+        try {
+            ConnectionFactory factory = new ConnectionFactory();
+            factory.setHost("localhost");
+            factory.setUsername("guest");
+            factory.setPassword("guest");
+            this.connection = factory.newConnection();
+            this.channel = connection.createChannel();
+            channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+        } catch (Exception e) {
+            logger.severe("Ошибка при подключении к RabbitMQ: " + e.getMessage());
         }
     }
 
